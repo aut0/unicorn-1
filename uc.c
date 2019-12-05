@@ -459,28 +459,6 @@ uc_err uc_open(const char* model, void *cfg_opaque, uc_get_config_t cfg_func,
     }
 }
 
-static void free_hooks(uc_engine *uc)
-{
-    struct list_item *cur;
-    struct hook *hook;
-    int i;
-
-    // free hooks and hook lists
-    for (i = 0; i < UC_HOOK_MAX; i++) {
-        cur = uc->hook[i].head;
-        // hook can be in more than one list
-        // so we refcount to know when to free
-        while (cur) {
-            hook = (struct hook *)cur->data;
-            if (--hook->refs == 0) {
-                free(hook);
-            }
-            cur = cur->next;
-        }
-        list_clear(&uc->hook[i]);
-    }
-}
-
 static void free_mmios(uc_engine *uc)
 {
     uc_mmio_region_t *p = uc->mmios;
@@ -548,7 +526,6 @@ uc_err uc_close(uc_engine *uc)
     g_hash_table_foreach(uc->type_table, free_table, uc);
     g_hash_table_destroy(uc->type_table);
 
-    free_hooks(uc);
     free_mmios(uc);
     free(uc->mapped_blocks);
 
@@ -1237,134 +1214,6 @@ MemoryRegion *memory_mapping(struct uc_struct* uc, uint64_t address)
 
     // not found
     return NULL;
-}
-
-UNICORN_EXPORT
-uc_err uc_hook_add(uc_engine *uc, uc_hook *hh, int type, void *callback,
-        void *user_data, uint64_t begin, uint64_t end, ...)
-{
-    int ret = UC_ERR_OK;
-    int i = 0;
-
-    struct hook *hook = calloc(1, sizeof(struct hook));
-    if (hook == NULL) {
-        return UC_ERR_NOMEM;
-    }
-
-    hook->begin = begin;
-    hook->end = end;
-    hook->type = type;
-    hook->callback = callback;
-    hook->user_data = user_data;
-    hook->refs = 0;
-    *hh = (uc_hook)hook;
-
-    // UC_HOOK_INSN has an extra argument for instruction ID
-    if (type & UC_HOOK_INSN) {
-        va_list valist;
-
-        va_start(valist, end);
-        hook->insn = va_arg(valist, int);
-        va_end(valist);
-
-        if (uc->insn_hook_validate) {
-            if (! uc->insn_hook_validate(hook->insn)) {
-                free(hook);
-                return UC_ERR_HOOK;
-            }
-        }
-
-        if (uc->hook_insert) {
-            if (list_insert(&uc->hook[UC_HOOK_INSN_IDX], hook) == NULL) {
-                free(hook);
-                return UC_ERR_NOMEM;
-            }
-        } else {
-            if (list_append(&uc->hook[UC_HOOK_INSN_IDX], hook) == NULL) {
-                free(hook);
-                return UC_ERR_NOMEM;
-            }
-        }
-
-        hook->refs++;
-        return UC_ERR_OK;
-    }
-
-    while ((type >> i) > 0) {
-        if ((type >> i) & 1) {
-            // TODO: invalid hook error?
-            if (i < UC_HOOK_MAX) {
-                if (uc->hook_insert) {
-                    if (list_insert(&uc->hook[i], hook) == NULL) {
-                        if (hook->refs == 0) {
-                            free(hook);
-                        }
-                        return UC_ERR_NOMEM;
-                    }
-                } else {
-                    if (list_append(&uc->hook[i], hook) == NULL) {
-                        if (hook->refs == 0) {
-                            free(hook);
-                        }
-                        return UC_ERR_NOMEM;
-                    }
-                }
-                hook->refs++;
-            }
-        }
-        i++;
-    }
-
-    // we didn't use the hook
-    // TODO: return an error?
-    if (hook->refs == 0) {
-        free(hook);
-    }
-
-    return ret;
-}
-
-UNICORN_EXPORT
-uc_err uc_hook_del(uc_engine *uc, uc_hook hh)
-{
-    int i;
-    struct hook *hook = (struct hook *)hh;
-    // we can't dereference hook->type if hook is invalid
-    // so for now we need to iterate over all possible types to remove the hook
-    // which is less efficient
-    // an optimization would be to align the hook pointer
-    // and store the type mask in the hook pointer.
-    for (i = 0; i < UC_HOOK_MAX; i++) {
-        if (list_remove(&uc->hook[i], (void *)hook)) {
-            if (--hook->refs == 0) {
-                free(hook);
-                break;
-            }
-        }
-    }
-    return UC_ERR_OK;
-}
-
-// TCG helper
-void helper_uc_tracecode(int32_t size, uc_hook_type type, void *handle, int64_t address);
-void helper_uc_tracecode(int32_t size, uc_hook_type type, void *handle, int64_t address)
-{
-    struct uc_struct *uc = handle;
-    struct list_item *cur = uc->hook[type].head;
-    struct hook *hook;
-
-    // sync PC in CPUArchState with address
-    if (uc->set_pc) {
-        uc->set_pc(uc, address);
-    }
-
-    while (cur != NULL && !uc->stop_request) {
-        hook = (struct hook *)cur->data;
-        if (HOOK_BOUND_CHECK(hook, (uint64_t)address)) {
-            ((uc_cb_hookcode_t)hook->callback)(uc, address, size, hook->user_data);
-        }
-        cur = cur->next;
-    }
 }
 
 UNICORN_EXPORT

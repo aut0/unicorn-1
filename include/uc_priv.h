@@ -109,66 +109,6 @@ typedef uint64_t (*uc_mem_redirect_t)(uint64_t address);
 // validate if Unicorn supports hooking a given instruction
 typedef bool(*uc_insn_hook_validate)(uint32_t insn_enum);
 
-struct hook {
-    int type;            // UC_HOOK_*
-    int insn;            // instruction for HOOK_INSN
-    int refs;            // reference count to free hook stored in multiple lists
-    uint64_t begin, end; // only trigger if PC or memory access is in this address (depends on hook type)
-    void *callback;      // a uc_cb_* type
-    void *user_data;
-};
-
-// hook list offsets
-// mirrors the order of uc_hook_type from include/unicorn/unicorn.h
-enum uc_hook_idx {
-    UC_HOOK_INTR_IDX,
-    UC_HOOK_INSN_IDX,
-    UC_HOOK_CODE_IDX,
-    UC_HOOK_BLOCK_IDX,
-    UC_HOOK_MEM_READ_UNMAPPED_IDX,
-    UC_HOOK_MEM_WRITE_UNMAPPED_IDX,
-    UC_HOOK_MEM_FETCH_UNMAPPED_IDX,
-    UC_HOOK_MEM_READ_PROT_IDX,
-    UC_HOOK_MEM_WRITE_PROT_IDX,
-    UC_HOOK_MEM_FETCH_PROT_IDX,
-    UC_HOOK_MEM_READ_IDX,
-    UC_HOOK_MEM_WRITE_IDX,
-    UC_HOOK_MEM_FETCH_IDX,
-    UC_HOOK_MEM_READ_AFTER_IDX,
-
-    UC_HOOK_MAX,
-};
-
-#define HOOK_FOREACH_VAR_DECLARE                          \
-    struct list_item *cur
-
-// for loop macro to loop over hook lists
-#define HOOK_FOREACH(uc, hh, idx)                         \
-    for (                                                 \
-        cur = (uc)->hook[idx##_IDX].head;                 \
-        cur != NULL && ((hh) = (struct hook *)cur->data)  \
-            /* stop excuting callbacks on stop request */ \
-            && !uc->stop_request;                         \
-        cur = cur->next)
-
-// if statement to check hook bounds
-#define HOOK_BOUND_CHECK(hh, addr)                  \
-    ((((addr) >= (hh)->begin && (addr) <= (hh)->end) \
-         || (hh)->begin > (hh)->end))
-
-#define HOOK_EXISTS(uc, idx) ((uc)->hook[idx##_IDX].head != NULL)
-#define HOOK_EXISTS_BOUNDED(uc, idx, addr) _hook_exists_bounded((uc)->hook[idx##_IDX].head, addr)
-
-static inline bool _hook_exists_bounded(struct list_item *cur, uint64_t addr)
-{
-    while (cur != NULL) {
-        if (HOOK_BOUND_CHECK((struct hook *)cur->data, addr))
-            return true;
-        cur = cur->next;
-    }
-    return false;
-}
-
 //relloc increment, KEEP THIS A POWER OF 2!
 #define MEM_BLOCK_INCR 32
 
@@ -335,12 +275,6 @@ struct uc_struct {
     int apic_no;
     bool mmio_registered;
     bool apic_report_tpr_access;
-
-    // linked lists containing hooks per type
-    struct list hook[UC_HOOK_MAX];
-
-    // hook to count number of instructions for uc_emu_start()
-    uc_hook count_hook;
 
     size_t emu_counter; // current counter of uc_emu_start()
     size_t emu_count; // save counter of uc_emu_start()

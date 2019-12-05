@@ -43,15 +43,6 @@ void vec_gen_2(TCGContext *, TCGOpcode, TCGType, unsigned, TCGArg, TCGArg);
 void vec_gen_3(TCGContext *, TCGOpcode, TCGType, unsigned, TCGArg, TCGArg, TCGArg);
 void vec_gen_4(TCGContext *, TCGOpcode, TCGType, unsigned, TCGArg, TCGArg, TCGArg, TCGArg);
 
-static inline void gen_uc_tracecode(TCGContext *tcg_ctx, int32_t size, int32_t type, void *uc, uint64_t pc)
-{
-    TCGv_i32 tsize = tcg_const_i32(tcg_ctx, size);
-    TCGv_i32 ttype = tcg_const_i32(tcg_ctx, type);
-    TCGv_ptr tuc = tcg_const_ptr(tcg_ctx, uc);
-    TCGv_i64 tpc = tcg_const_i64(tcg_ctx, pc);
-    gen_helper_uc_tracecode(tcg_ctx, tsize, ttype, tuc, tpc);
-}
-
 static inline void tcg_gen_op1_i32(TCGContext *s, TCGOpcode opc, TCGv_i32 a1)
 {
     tcg_gen_op1(s, opc, tcgv_i32_arg(s, a1));

@@ -194,66 +194,33 @@ WORD_TYPE helper_be_ld_name(CPUArchState *env, target_ulong addr,
     uintptr_t haddr;
     DATA_TYPE res;
     int error_code;
-    struct hook *hook;
-    bool handled;
-    HOOK_FOREACH_VAR_DECLARE;
 
     struct uc_struct *uc = env->uc;
     MemoryRegion *mr = memory_mapping(uc, addr);
 
     // memory can be unmapped while reading or fetching
     if (mr == NULL) {
-        handled = false;
 #if defined(SOFTMMU_CODE_ACCESS)
         error_code = UC_ERR_FETCH_UNMAPPED;
         printf("invalid fetch at 0x%016lx\n", env->pc);
-        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_FETCH_UNMAPPED) {
-            if (!HOOK_BOUND_CHECK(hook, addr))
-                continue;
-            if ((handled = ((uc_cb_eventmem_t)hook->callback)(uc, UC_MEM_FETCH_UNMAPPED, addr, DATA_SIZE, 0, hook->user_data)))
-                break;
-        }
 #else
         error_code = UC_ERR_READ_UNMAPPED;
-        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_READ_UNMAPPED) {
-            if (!HOOK_BOUND_CHECK(hook, addr))
-                continue;
-            if ((handled = ((uc_cb_eventmem_t)hook->callback)(uc, UC_MEM_READ_UNMAPPED, addr, DATA_SIZE, 0, hook->user_data)))
-                break;
-        }
 #endif
-        if (handled) {
-            env->invalid_error = UC_ERR_OK;
-            mr = memory_mapping(uc, addr);  // FIXME: what if mr is still NULL at this time?
-        } else {
-            env->invalid_addr = addr;
-            env->invalid_error = error_code;
-            // printf("***** Invalid fetch (unmapped memory) at " TARGET_FMT_lx "\n", addr);
-            cpu_exit(uc->current_cpu);
-            return 0;
-        }
+        env->invalid_addr = addr;
+        env->invalid_error = error_code;
+        // printf("***** Invalid fetch (unmapped memory) at " TARGET_FMT_lx "\n", addr);
+        cpu_exit(uc->current_cpu);
+        return 0;
     }
 
 #if defined(SOFTMMU_CODE_ACCESS)
     // Unicorn: callback on fetch from NX
     if (mr != NULL && !(mr->perms & UC_PROT_EXEC)) {  // non-executable
-        handled = false;
-        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_FETCH_PROT) {
-            if (!HOOK_BOUND_CHECK(hook, addr))
-                continue;
-            if ((handled = ((uc_cb_eventmem_t)hook->callback)(uc, UC_MEM_FETCH_PROT, addr, DATA_SIZE, 0, hook->user_data)))
-                break;
-        }
-
-        if (handled) {
-            env->invalid_error = UC_ERR_OK;
-        } else {
-            env->invalid_addr = addr;
-            env->invalid_error = UC_ERR_FETCH_PROT;
-            // printf("***** Invalid fetch (non-executable) at " TARGET_FMT_lx "\n", addr);
-            cpu_exit(uc->current_cpu);
-            return 0;
-        }
+        env->invalid_addr = addr;
+        env->invalid_error = UC_ERR_FETCH_PROT;
+        // printf("***** Invalid fetch (non-executable) at " TARGET_FMT_lx "\n", addr);
+        cpu_exit(uc->current_cpu);
+        return 0;
     }
 #endif
 
@@ -262,33 +229,14 @@ WORD_TYPE helper_be_ld_name(CPUArchState *env, target_ulong addr,
     // the callback if read access is succesful, or not.
     // See UC_HOOK_MEM_READ_AFTER & UC_MEM_READ_AFTER if you only care
     // about successful read
-    if (READ_ACCESS_TYPE == MMU_DATA_LOAD) {
-        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_READ) {
-            if (!HOOK_BOUND_CHECK(hook, addr))
-                continue;
-            ((uc_cb_hookmem_t)hook->callback)(env->uc, UC_MEM_READ, addr, DATA_SIZE, 0, hook->user_data);
-        }
-    }
 
     // Unicorn: callback on non-readable memory
     if (READ_ACCESS_TYPE == MMU_DATA_LOAD && mr != NULL && !(mr->perms & UC_PROT_READ)) {  //non-readable
-        handled = false;
-        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_READ_PROT) {
-            if (!HOOK_BOUND_CHECK(hook, addr))
-                continue;
-            if ((handled = ((uc_cb_eventmem_t)hook->callback)(uc, UC_MEM_READ_PROT, addr, DATA_SIZE, 0, hook->user_data)))
-                break;
-        }
-
-        if (handled) {
-            env->invalid_error = UC_ERR_OK;
-        } else {
-            env->invalid_addr = addr;
-            env->invalid_error = UC_ERR_READ_PROT;
-            // printf("***** Invalid memory read (non-readable) at " TARGET_FMT_lx "\n", addr);
-            cpu_exit(uc->current_cpu);
-            return 0;
-        }
+        env->invalid_addr = addr;
+        env->invalid_error = UC_ERR_READ_PROT;
+        // printf("***** Invalid memory read (non-readable) at " TARGET_FMT_lx "\n", addr);
+        cpu_exit(uc->current_cpu);
+        return 0;
     }
 
     if (addr & ((1 << a_bits) - 1)) {
@@ -482,62 +430,27 @@ void helper_be_st_name(CPUArchState *env, target_ulong addr, DATA_TYPE val,
     target_ulong tlb_addr = tlb_addr_write(entry);
     unsigned a_bits = get_alignment_bits(get_memop(oi));
     uintptr_t haddr;
-    struct hook *hook;
-    bool handled;
-    HOOK_FOREACH_VAR_DECLARE;
 
     struct uc_struct *uc = env->uc;
     MemoryRegion *mr = memory_mapping(uc, addr);
 
-    // Unicorn: callback on memory write
-    HOOK_FOREACH(uc, hook, UC_HOOK_MEM_WRITE) {
-        if (!HOOK_BOUND_CHECK(hook, addr))
-            continue;
-        ((uc_cb_hookmem_t)hook->callback)(uc, UC_MEM_WRITE, addr, DATA_SIZE, val, hook->user_data);
-    }
-
     // Unicorn: callback on invalid memory
     if (mr == NULL) {
-        handled = false;
-        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_WRITE_UNMAPPED) {
-            if (!HOOK_BOUND_CHECK(hook, addr))
-                continue;
-            if ((handled = ((uc_cb_eventmem_t)hook->callback)(uc, UC_MEM_WRITE_UNMAPPED, addr, DATA_SIZE, val, hook->user_data)))
-                break;
-        }
-
-        if (!handled) {
-            // save error & quit
-            env->invalid_addr = addr;
-            env->invalid_error = UC_ERR_WRITE_UNMAPPED;
-            // printf("***** Invalid memory write at " TARGET_FMT_lx "\n", addr);
-            cpu_exit(uc->current_cpu);
-            return;
-        } else {
-            env->invalid_error = UC_ERR_OK;
-            mr = memory_mapping(uc, addr);  // FIXME: what if mr is still NULL at this time?
-        }
+        // save error & quit
+        env->invalid_addr = addr;
+        env->invalid_error = UC_ERR_WRITE_UNMAPPED;
+        // printf("***** Invalid memory write at " TARGET_FMT_lx "\n", addr);
+        cpu_exit(uc->current_cpu);
+        return;
     }
 
     // Unicorn: callback on non-writable memory
     if (mr != NULL && !(mr->perms & UC_PROT_WRITE)) {  //non-writable
-        handled = false;
-        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_WRITE_PROT) {
-            if (!HOOK_BOUND_CHECK(hook, addr))
-                continue;
-            if ((handled = ((uc_cb_eventmem_t)hook->callback)(uc, UC_MEM_WRITE_PROT, addr, DATA_SIZE, val, hook->user_data)))
-                break;
-        }
-
-        if (handled) {
-            env->invalid_error = UC_ERR_OK;
-        } else {
-            env->invalid_addr = addr;
-            env->invalid_error = UC_ERR_WRITE_PROT;
-            // printf("***** Invalid memory write (ro) at " TARGET_FMT_lx "\n", addr);
-            cpu_exit(uc->current_cpu);
-            return;
-        }
+        env->invalid_addr = addr;
+        env->invalid_error = UC_ERR_WRITE_PROT;
+        // printf("***** Invalid memory write (ro) at " TARGET_FMT_lx "\n", addr);
+        cpu_exit(uc->current_cpu);
+        return;
     }
 
     if (addr & ((1 << a_bits) - 1)) {

@@ -9376,13 +9376,6 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
         return;
     }
 
-    // Unicorn: trace this instruction on request
-    if (HOOK_EXISTS_BOUNDED(s->uc, UC_HOOK_CODE, s->pc - 4)) {
-        gen_uc_tracecode(tcg_ctx, 4, UC_HOOK_CODE_IDX, s->uc, s->pc - 4);
-        // the callback might want to stop emulation immediately
-        check_exit_request(tcg_ctx);
-    }
-
     cond = insn >> 28;
     if (cond == 0xf){
         /* In ARMv3 and v4 the NV condition is UNPREDICTABLE; we
@@ -12625,25 +12618,6 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
     TCGv_i32 tmp;
     TCGv_i32 tmp2;
     TCGv_i32 addr;
-
-    // Unicorn: trace this instruction on request
-    if (HOOK_EXISTS_BOUNDED(s->uc, UC_HOOK_CODE, s->pc)) {
-        // determine instruction size (Thumb/Thumb2)
-        switch(insn & 0xf800) {
-            // Thumb2: 32-bit
-            case 0xe800:
-            case 0xf000:
-            case 0xf800:
-                gen_uc_tracecode(tcg_ctx, 4, UC_HOOK_CODE_IDX, s->uc, s->pc);
-                break;
-            // Thumb: 16-bit
-            default:
-                gen_uc_tracecode(tcg_ctx, 2, UC_HOOK_CODE_IDX, s->uc, s->pc);
-                break;
-        }
-        // the callback might want to stop emulation immediately
-        check_exit_request(tcg_ctx);
-    }
 
     switch (insn >> 12) {
     case 0: case 1:
